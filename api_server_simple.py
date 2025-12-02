@@ -9,6 +9,9 @@ from fastapi.responses import FileResponse
 from typing import Dict, Any, Annotated
 from PIL import Image, ImageDraw
 import random
+import cv2
+import numpy as np
+from skimage.metrics import structural_similarity as ssim
 
 def create_placeholder_mask(filename="placeholder_mask.png"):
     """Create a simple placeholder mask image"""
@@ -29,24 +32,75 @@ def create_placeholder_mask(filename="placeholder_mask.png"):
     except:
         return "/static/placeholder_mask.png"
 
-def simple_change_detection_with_images():
-    """Simulate change detection using actual image files"""
-    before_path = "data/sim_border_before.jpg"
-    after_path = "data/sim_border_after_infiltration.jpg"
+def process_border_surveillance_images():
+    """Process actual border surveillance images using computer vision"""
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    before_path = os.path.join(base_dir, "data", "sim_border_before.jpg")
+    after_path = os.path.join(base_dir, "data", "sim_border_after_infiltration.jpg")
     
     # Check if images exist
     if not os.path.exists(before_path) or not os.path.exists(after_path):
         raise FileNotFoundError(f"Simulation images not found: {before_path} or {after_path}")
     
-    # For now, simulate the detection results but indicate we're using real images
-    detected_contours = [
-        {"area": 1200, "bbox": [150, 200, 60, 45]},  # Large structure
-        {"area": 850, "bbox": [300, 150, 40, 35]},   # Medium equipment  
-        {"area": 420, "bbox": [250, 320, 25, 20]},   # Small movement
-    ]
+    # Load images
+    img_before = cv2.imread(before_path)
+    img_after = cv2.imread(after_path)
     
-    ssim_score = 0.73  # Realistic similarity score
-    return None, ssim_score, detected_contours
+    if img_before is None or img_after is None:
+        raise ValueError("Could not load simulation images")
+    
+    # Resize images to same dimensions for comparison
+    height, width = min(img_before.shape[0], img_after.shape[0]), min(img_before.shape[1], img_after.shape[1])
+    img_before = cv2.resize(img_before, (width, height))
+    img_after = cv2.resize(img_after, (width, height))
+    
+    # Convert to grayscale for analysis
+    gray_before = cv2.cvtColor(img_before, cv2.COLOR_BGR2GRAY)
+    gray_after = cv2.cvtColor(img_after, cv2.COLOR_BGR2GRAY)
+    
+    # Calculate SSIM score
+    ssim_score, _ = ssim(gray_before, gray_after, full=True)
+    
+    # Compute difference
+    diff = cv2.absdiff(gray_before, gray_after)
+    
+    # Apply threshold to get binary difference image
+    _, thresh = cv2.threshold(diff, 30, 255, cv2.THRESH_BINARY)
+    
+    # Apply morphological operations to clean up noise
+    kernel = np.ones((5,5), np.uint8)
+    thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+    thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
+    
+    # Find contours
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    # Filter and process contours
+    detected_changes = []
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if area > 100:  # Filter small noise
+            x, y, w, h = cv2.boundingRect(contour)
+            detected_changes.append({
+                "area": int(area),
+                "bbox": [int(x), int(y), int(w), int(h)],
+                "contour": contour.tolist()
+            })
+    
+    # Generate change mask image
+    change_mask = np.zeros_like(gray_before)
+    for change in detected_changes:
+        contour_array = np.array(change["contour"], dtype=np.int32)
+        cv2.fillPoly(change_mask, [contour_array], 255)
+    
+    # Save change mask
+    static_dir = os.path.join(base_dir, "static")
+    os.makedirs(static_dir, exist_ok=True)
+    mask_filename = f"change_mask_{int(time.time())}.png"
+    mask_path = os.path.join(static_dir, mask_filename)
+    cv2.imwrite(mask_path, change_mask)
+    
+    return f"/static/{mask_filename}", ssim_score, detected_changes
 
 app = FastAPI(title="DRISHTI-SHIELD API")
 
@@ -139,23 +193,17 @@ def generate_simple_report(report_context: dict, risk_score: float) -> str:
     
     return f"{bluf}\n\n{details}\n\n{rec}"
 
-@app.post("/api/v1/analyze_aoi")
-async def analyze_area_of_interest(
-    aoi_bounds_json: Annotated[str, Form()],
-    image_before: Annotated[UploadFile, File()],
-    image_after: Annotated[UploadFile, File()]
-):
+@app.post("/api/v1/analyze_aoi_auto")
+async def analyze_area_of_interest_auto(request: dict):
+    """Automatic AOI analysis using pre-loaded simulation images"""
     try:
-        aoi_bounds = json.loads(aoi_bounds_json)
+        aoi_bounds = request.get("aoi_bounds", {
+            "north_east": {"lat": 31.6205, "lng": 74.8952},
+            "south_west": {"lat": 31.6185, "lng": 74.8932}
+        })
         
-        upload_dir = f"data/uploads/{random.randint(1000,9999)}"
-        os.makedirs(upload_dir, exist_ok=True)
-        
-        # Use actual simulation images for detection
-        change_mask, ssim_score, detected_contours = simple_change_detection_with_images()
-        
-        # Generate a dynamic mask image
-        mask_url = create_placeholder_mask(f"mask_{random.randint(1000,9999)}.png")
+        # Use actual computer vision processing on simulation images
+        change_mask_url, ssim_score, detected_contours = process_border_surveillance_images()
         
         fused_data = []
         total_anomaly_area = 0
@@ -167,18 +215,20 @@ async def analyze_area_of_interest(
             anomaly_class = "Unknown Anomaly"
             if area > 1000: 
                 anomaly_class = "Major Structure"
+            elif area > 500: 
+                anomaly_class = "Vehicle / Equipment"
             elif area > 200: 
-                anomaly_class = "Vehicle / Site"
+                anomaly_class = "Personnel Movement"
             else: 
-                anomaly_class = "Minor Anomaly / Movement"
+                anomaly_class = "Minor Activity"
             
             fused_data.append({
                 "bbox_pixels": contour_data["bbox"],
                 "class": anomaly_class,
-                "confidence": 0.9 + (area / 10000.0),
-                "type": "New Anomaly",
+                "confidence": min(0.95, 0.7 + (area / 2000.0)),
+                "type": "Computer Vision Detection",
                 "area_pixels": int(area),
-                "threat_level": "HIGH" if area > 1000 else "MEDIUM" if area > 200 else "LOW"
+                "threat_level": "HIGH" if area > 1000 else "MEDIUM" if area > 500 else "LOW"
             })
         
         num_anomalies = len(fused_data)
@@ -198,13 +248,15 @@ async def analyze_area_of_interest(
         
         response_payload = {
             "report_summary": report_text,
-            "change_mask_url": mask_url,
+            "change_mask_url": change_mask_url,
             "anomalies_geojson": anomalies_geojson,
             "image_bounds": aoi_bounds,
             "risk_score": risk_score,
             "fused_data": fused_data,
             "has_changes": num_anomalies > 0,
-            "warning_message": f"⚠️ WARNING!! Noticed {num_anomalies} changes detected in AOI" if num_anomalies > 0 else "✅ No significant changes detected"
+            "warning_message": f"⚠️ WARNING!! {num_anomalies} changes detected in border area" if num_anomalies > 0 else "✅ No significant changes detected",
+            "analysis_method": "Computer Vision Processing",
+            "ssim_similarity": round(ssim_score, 3)
         }
         
         return response_payload
@@ -218,11 +270,11 @@ async def monitor_satellite_data(request: dict):
         location = request.get("location", "wagah")
         aoi_bounds = request.get("aoi_bounds")
         
-        # Use actual simulation images for monitoring
-        change_mask, ssim_score, detected_contours = simple_change_detection_with_images()
+        # Use actual computer vision processing for monitoring
+        change_mask_url, ssim_score, detected_contours = process_border_surveillance_images()
         
-        # Generate a dynamic mask image for monitoring
-        mask_url = create_placeholder_mask(f"monitor_{location}_{int(time.time())}.png")
+        # Use the generated mask URL for monitoring
+        mask_url = change_mask_url
         
         fused_data = []
         for i, contour_data in enumerate(detected_contours):
