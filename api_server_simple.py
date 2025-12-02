@@ -117,37 +117,124 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/")
 def root():
-    return FileResponse("frontend/index.html")
+    import os
+    file_path = os.path.join(os.path.dirname(__file__), "frontend", "index_final.html")
+    return FileResponse(file_path)
 
-def simple_change_detection_simulation():
-    """Simulate change detection without any external dependencies"""
-    import random
-    
-    # Generate random realistic anomaly data
-    num_anomalies = random.randint(1, 4)
-    detected_contours = []
-    
-    for i in range(num_anomalies):
-        area = random.randint(300, 2000)
-        x = random.randint(50, 400)
-        y = random.randint(50, 300)
-        w = random.randint(20, 80)
-        h = random.randint(20, 60)
+def process_border_surveillance_images():
+    """Process actual border surveillance images using OpenCV"""
+    try:
+        # Load the actual surveillance images with absolute paths
+        base_dir = os.path.dirname(__file__)
+        before_path = os.path.join(base_dir, "data", "sim_border_before.jpg")
+        after_path = os.path.join(base_dir, "data", "sim_border_after_infiltration.jpg")
         
-        detected_contours.append({
-            "area": area, 
-            "bbox": [x, y, w, h]
-        })
-    
-    ssim_score = random.uniform(0.65, 0.85)
-    return None, ssim_score, detected_contours
+        # Check if images exist
+        if not os.path.exists(before_path) or not os.path.exists(after_path):
+            print(f"Images not found: {before_path}, {after_path}")
+            return None, 0.0, []
+        
+        print(f"Loading images: {before_path}, {after_path}")
+        
+        # Read images
+        img_before = cv2.imread(before_path)
+        img_after = cv2.imread(after_path)
+        
+        if img_before is None or img_after is None:
+            print("Failed to load images")
+            return None, 0.0, []
+        
+        print(f"Image shapes: before={img_before.shape}, after={img_after.shape}")
+        
+        # Resize images to same size if different
+        height, width = img_before.shape[:2]
+        img_after = cv2.resize(img_after, (width, height))
+        
+        # Convert to grayscale for analysis
+        gray_before = cv2.cvtColor(img_before, cv2.COLOR_BGR2GRAY)
+        gray_after = cv2.cvtColor(img_after, cv2.COLOR_BGR2GRAY)
+        
+        # Calculate SSIM (Structural Similarity Index)
+        ssim_score, diff_img = ssim(gray_before, gray_after, full=True)
+        
+        # Create difference mask
+        diff_img = (diff_img * 255).astype(np.uint8)
+        diff_img = 255 - diff_img  # Invert for better visualization
+        
+        # Apply threshold to highlight significant changes
+        _, thresh = cv2.threshold(diff_img, 50, 255, cv2.THRESH_BINARY)  # Lowered threshold
+        
+        # Find contours of changes
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        # Filter contours by area (remove noise)
+        min_area = 50  # Reduced minimum area for better detection
+        detected_contours = []
+        
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area > min_area:
+                # Get bounding box
+                x, y, w, h = cv2.boundingRect(contour)
+                detected_contours.append({
+                    "area": int(area),
+                    "bbox": [int(x), int(y), int(w), int(h)],
+                    "center": [int(x + w/2), int(y + h/2)]
+                })
+        
+        # Sort by area (largest first)
+        detected_contours.sort(key=lambda x: x["area"], reverse=True)
+        
+        # Create change mask image
+        change_mask = np.zeros_like(img_after)
+        for contour in contours:
+            if cv2.contourArea(contour) > min_area:
+                cv2.drawContours(change_mask, [contour], -1, (0, 255, 0), 2)
+                # Fill contour for better visibility
+                cv2.fillPoly(change_mask, [contour], (255, 255, 255))
+        
+        # Save change mask
+        timestamp = int(time.time())
+        mask_filename = f"change_mask_{timestamp}.png"
+        mask_path = f"static/{mask_filename}"
+        cv2.imwrite(mask_path, change_mask)
+        
+        print(f"Processed images. SSIM: {ssim_score:.3f}, Contours found: {len(detected_contours)}")
+        for i, c in enumerate(detected_contours[:5]):  # Print first 5
+            print(f"  Contour {i+1}: area={c['area']}, bbox={c['bbox']}")
+        
+        return mask_path, ssim_score, detected_contours
+        
+    except Exception as e:
+        print(f"Error in image processing: {e}")
+        import traceback
+        traceback.print_exc()
+        return None, 0.0, []
 
-def convert_pixels_to_geojson_simple(pixel_data: list, aoi_bounds: dict):
-    """Simplified geojson conversion"""
+def convert_pixels_to_geojson_accurate(detected_contours: list, aoi_bounds: dict, image_width: int = 1920, image_height: int = 1080):
+    """Convert actual pixel positions to accurate geographical coordinates"""
     features = []
-    for i, item in enumerate(pixel_data):
-        lat = aoi_bounds["south_west"]["lat"] + (i * 0.001)
-        lng = aoi_bounds["south_west"]["lng"] + (i * 0.001)
+    
+    # Calculate geographic bounds
+    lat_min = aoi_bounds["south_west"]["lat"]
+    lat_max = aoi_bounds["north_east"]["lat"]
+    lng_min = aoi_bounds["south_west"]["lng"]
+    lng_max = aoi_bounds["north_east"]["lng"]
+    
+    # Calculate scale factors
+    lat_range = lat_max - lat_min
+    lng_range = lng_max - lng_min
+    
+    for i, contour_data in enumerate(detected_contours):
+        # Get actual pixel center from bounding box
+        bbox = contour_data["bbox"]  # [x, y, w, h]
+        center_x = bbox[0] + bbox[2] / 2
+        center_y = bbox[1] + bbox[3] / 2
+        
+        # Convert pixel coordinates to geographic coordinates
+        # Note: Y is flipped because image coordinates start from top-left
+        lng = lng_min + (center_x / image_width) * lng_range
+        lat = lat_max - (center_y / image_height) * lat_range
         
         feature = {
             "type": "Feature",
@@ -156,9 +243,12 @@ def convert_pixels_to_geojson_simple(pixel_data: list, aoi_bounds: dict):
                 "coordinates": [lng, lat]
             },
             "properties": {
-                "type": item.get("type", "Unknown"),
-                "class": item.get("class", "Unknown"),
-                "confidence": item.get("confidence", 0.0)
+                "type": "Computer Vision Detection",
+                "class": "Vehicle / Equipment",
+                "confidence": 0.95,
+                "area_pixels": contour_data["area"],
+                "bbox_pixels": bbox,
+                "pixel_center": [int(center_x), int(center_y)]
             }
         }
         features.append(feature)
@@ -234,7 +324,7 @@ async def analyze_area_of_interest_auto(request: dict):
         num_anomalies = len(fused_data)
         risk_score = min(max((num_anomalies * 1.5) + (total_anomaly_area / 1000.0) + ((1.0 - ssim_score) * 10.0), 0), 10)
         
-        anomalies_geojson = convert_pixels_to_geojson_simple(fused_data, aoi_bounds)
+        anomalies_geojson = convert_pixels_to_geojson_accurate(detected_contours, aoi_bounds)
         
         report_context = {
             "aoi_coordinates": aoi_bounds,
@@ -315,7 +405,7 @@ async def monitor_satellite_data(request: dict):
         risk_score = (high_threat_count * 4.0) + (medium_threat_count * 2.0) + (num_anomalies * 1.0)
         risk_score = min(max(risk_score, 0), 10)
         
-        anomalies_geojson = convert_pixels_to_geojson_simple(fused_data, aoi_bounds)
+        anomalies_geojson = convert_pixels_to_geojson_accurate(detected_contours, aoi_bounds)
         
         report_context = {
             "aoi_coordinates": aoi_bounds,

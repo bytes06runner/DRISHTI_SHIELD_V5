@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DRISHTI-SHIELD | Clean Version</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { font-family: 'Inter', sans-serif; overflow: hidden; }
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #3b82f6; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-neutral-900 text-white overflow-hidden">
+    <div class="h-screen flex">
+        <!-- Left Panel -->
+        <div class="w-80 bg-neutral-800 p-4 flex flex-col space-y-4 overflow-y-auto">
+            <div>
+                <h1 class="text-2xl font-bold text-white">DRISHTI-SHIELD V5</h1>
+                <p class="text-sm text-blue-400">✅ NO IMAGE UPLOAD REQUIRED</p>
+            </div>
+
+            <div class="bg-neutral-700 p-4 rounded-lg space-y-3">
+                <h3 class="text-lg font-semibold text-white">🛰️ Computer Vision Analysis</h3>
+                <p class="text-xs text-neutral-400">Automatic processing of pre-loaded surveillance images</p>
+                
+                <div>
+                    <label class="text-sm font-medium text-neutral-300 block mb-2">Select Location:</label>
+                    <select id="location-select" class="w-full bg-neutral-600 text-white p-2 rounded-md">
+                        <option value="wagah">Wagah Border (Pakistan-India)</option>
+                        <option value="loc">Line of Control (Kashmir)</option>
+                        <option value="custom">Custom Location</option>
+                    </select>
+                </div>
+                
+                <button id="analyze-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg transition-colors duration-200">
+                    🔍 ANALYZE NOW (OpenCV Computer Vision)
+                </button>
+
+                <div class="bg-green-800 p-3 rounded-lg border border-green-600">
+                    <h4 class="text-sm font-medium text-green-200 mb-2">✅ System Ready</h4>
+                    <p class="text-xs text-green-300">• Images: sim_border_before.jpg & sim_border_after_infiltration.jpg</p>
+                    <p class="text-xs text-green-300">• Computer Vision: OpenCV + SSIM analysis</p>
+                    <p class="text-xs text-green-300">• NO MANUAL UPLOAD NEEDED</p>
+                </div>
+            </div>
+            
+            <div id="status-panel" class="bg-neutral-700 p-4 rounded-lg hidden">
+                <h3 class="text-lg font-semibold text-white mb-3">Analysis Status</h3>
+                <div class="flex items-center space-x-3">
+                    <div id="loader" class="loader hidden"></div>
+                    <span id="status-text" class="text-neutral-300">Ready for analysis...</span>
+                </div>
+            </div>
+
+            <div id="results-panel" class="bg-neutral-700 p-4 rounded-lg hidden flex-grow flex flex-col space-y-4">
+                <h3 class="text-lg font-semibold text-white">Computer Vision Results</h3>
+                
+                <div>
+                    <label class="text-sm font-medium text-neutral-400">Risk Assessment</label>
+                    <div class="bg-neutral-800 rounded-lg p-3 mt-1">
+                        <span id="risk-score" class="text-3xl font-bold text-red-500">0.0</span>
+                        <span class="text-lg text-neutral-400">/ 10.0</span>
+                    </div>
+                </div>
+
+                <div class="flex-grow">
+                    <label class="text-sm font-medium text-neutral-400">Detected Anomalies</label>
+                    <ul id="detections-list" class="bg-neutral-800 rounded-lg p-3 mt-1 h-48 overflow-y-auto space-y-2 text-sm">
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Map Container -->
+        <div class="flex-1 relative">
+            <div id="map" class="w-full h-full"></div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const API_URL = "http://127.0.0.1:8000/api/v1/analyze_aoi_auto";
+        
+        const analyzeBtn = document.getElementById('analyze-btn');
+        const statusPanel = document.getElementById('status-panel');
+        const loader = document.getElementById('loader');
+        const statusText = document.getElementById('status-text');
+        const resultsPanel = document.getElementById('results-panel');
+        const riskScoreEl = document.getElementById('risk-score');
+        const detectionsList = document.getElementById('detections-list');
+
+        let map;
+
+        function initMap() {
+            map = L.map('map', { center: [31.6, 74.575], zoom: 14 });
+            
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: '© Esri'
+            }).addTo(map);
+        }
+
+        function showLoading(message) {
+            statusText.textContent = message;
+            loader.classList.remove('hidden');
+            statusPanel.classList.remove('hidden');
+            analyzeBtn.disabled = true;
+            analyzeBtn.textContent = "Processing...";
+        }
+
+        function hideLoading() {
+            loader.classList.add('hidden');
+            statusPanel.classList.add('hidden');
+            analyzeBtn.disabled = false;
+            analyzeBtn.textContent = "🔍 ANALYZE NOW (OpenCV Computer Vision)";
+        }
+
+        function showResults(data) {
+            riskScoreEl.textContent = data.risk_score.toFixed(1);
+            
+            if (data.risk_score >= 8.0) {
+                riskScoreEl.className = 'text-3xl font-bold text-red-500';
+            } else if (data.risk_score >= 5.0) {
+                riskScoreEl.className = 'text-3xl font-bold text-orange-500';
+            } else {
+                riskScoreEl.className = 'text-3xl font-bold text-green-500';
+            }
+
+            detectionsList.innerHTML = '';
+            if (data.fused_data && data.fused_data.length > 0) {
+                data.fused_data.forEach((detection, index) => {
+                    const li = document.createElement('li');
+                    li.className = 'flex justify-between items-center p-2 bg-neutral-900 rounded';
+                    
+                    const threatClass = detection.threat_level === 'HIGH' ? 'text-red-400' : 
+                                       detection.threat_level === 'MEDIUM' ? 'text-orange-400' : 'text-yellow-400';
+                    
+                    li.innerHTML = `
+                        <div>
+                            <span class="font-medium">${detection.class}</span>
+                            <div class="text-xs text-neutral-500">${detection.area_pixels} px²</div>
+                        </div>
+                        <span class="${threatClass} text-xs font-bold">${detection.threat_level}</span>
+                    `;
+                    detectionsList.appendChild(li);
+                });
+            } else {
+                detectionsList.innerHTML = '<li class="text-neutral-500 p-2">No significant detections</li>';
+            }
+            resultsPanel.classList.remove('hidden');
+        }
+
+        async function performAnalysis() {
+            try {
+                console.log('Starting OpenCV computer vision analysis...');
+                showLoading('🔍 Running OpenCV computer vision on surveillance images...');
+
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        aoi_bounds: {
+                            north_east: { lat: 31.625, lng: 74.615 }, 
+                            south_west: { lat: 31.575, lng: 74.535 }
+                        }
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Analysis failed: ${response.status}`);
+                }
+
+                const data = await response.json();
+                console.log("Computer vision analysis complete:", data);
+
+                if (data.has_changes && data.fused_data && data.fused_data.length > 0) {
+                    showResults(data);
+                    statusText.textContent = `✅ Analysis complete - ${data.fused_data.length} anomalies detected`;
+                } else {
+                    resultsPanel.classList.add('hidden');
+                    statusText.textContent = `✅ Analysis complete - No significant changes detected`;
+                }
+                
+                statusPanel.classList.remove('hidden');
+                setTimeout(() => statusPanel.classList.add('hidden'), 3000);
+
+            } catch (error) {
+                console.error('Analysis Error:', error);
+                statusText.textContent = `❌ Analysis Error: ${error.message}`;
+                statusPanel.classList.remove('hidden');
+                setTimeout(() => statusPanel.classList.add('hidden'), 5000);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // Event listeners
+        analyzeBtn.addEventListener('click', performAnalysis);
+
+        // Initialize
+        initMap();
+    </script>
+</body>
+</html>
