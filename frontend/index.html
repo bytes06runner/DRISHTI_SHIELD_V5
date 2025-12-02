@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DRISHTI-SHIELD | AI Geospatial Assistant</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            overflow: hidden;
+        }
+        .leaflet-draw-toolbar a {
+            background-color: #262626 !important;
+            border: 1px solid #404040 !important;
+            border-radius: 4px;
+        }
+        .leaflet-draw-toolbar a:hover {
+            background-color: #404040 !important;
+        }
+        .leaflet-bar a, .leaflet-bar a:hover {
+            background-color: #262626 !important;
+            color: #e5e5e5 !important;
+            border: 1px solid #404040 !important;
+        }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3b82f6;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .modal {
+            transition: opacity 0.25s ease;
+        }
+        .modal-content {
+            transition: transform 0.25s ease;
+        }
+        .modal.opacity-0 {
+            pointer-events: none;
+        }
+        .modal-content.scale-95 {
+            transform: scale(0.95);
+        }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="bg-neutral-900 text-neutral-200 flex h-screen">
+
+    <aside class="flex-shrink-0 w-96 h-full bg-neutral-800 p-6 flex flex-col space-y-4 shadow-lg z-20 overflow-y-auto">
+        <div>
+            <h1 class="text-2xl font-bold text-white">DRISHTI-SHIELD</h1>
+            <p class="text-sm text-blue-400">AI Geospatial Intelligence Assistant</p>
+        </div>
+
+        <div class="bg-neutral-700 p-4 rounded-lg space-y-3">
+            <h3 class="text-lg font-semibold text-white">🛰️ Live Satellite Monitoring</h3>
+            <p class="text-xs text-neutral-400">Real-time change detection using satellite feeds</p>
+            
+            <div>
+                <label class="text-sm font-medium text-neutral-300 block mb-2">Select Location:</label>
+                <select id="location-select" class="w-full bg-neutral-600 text-white p-2 rounded-md">
+                    <option value="wagah">Wagah Border (Pakistan-India)</option>
+                    <option value="loc">Line of Control (Kashmir)</option>
+                    <option value="custom">Custom Location</option>
+                </select>
+            </div>
+            
+            <div class="flex space-x-2">
+                <button id="start-monitoring-btn" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200">
+                    🔄 Start Monitoring
+                </button>
+                <button id="check-now-btn" class="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200">
+                    ⚡ Check Now
+                </button>
+            </div>
+            
+            <div id="monitoring-status" class="text-center p-2 bg-neutral-800 rounded-md hidden">
+                <span class="text-green-400">🟢 Live Monitoring Active</span>
+                <div class="text-xs text-neutral-400 mt-1">Checking every 10 seconds...</div>
+            </div>
+        </div>
+        
+        <div id="status-panel" class="bg-neutral-700 p-4 rounded-lg hidden">
+            <h3 class="text-lg font-semibold text-white mb-3">System Status</h3>
+            <div class="flex items-center space-x-3">
+                <div id="loader" class="loader"></div>
+                <span id="status-text" class="text-neutral-300">Analyzing AOI...</span>
+            </div>
+        </div>
+
+        <div id="results-panel" class="bg-neutral-700 p-4 rounded-lg hidden flex-grow flex flex-col space-y-4">
+            <h3 class="text-lg font-semibold text-white">Analysis Complete</h3>
+            
+            <div>
+                <label class="text-sm font-medium text-neutral-400">Risk Assessment</label>
+                <div class="bg-neutral-800 rounded-lg p-3 mt-1">
+                    <span id="risk-score" class="text-3xl font-bold text-red-500">0.0</span>
+                    <span class="text-lg text-neutral-400">/ 10.0</span>
+                </div>
+            </div>
+
+            <div class="flex-grow">
+                <label class="text-sm font-medium text-neutral-400">Key Detections</label>
+                <ul id="key-detections" class="bg-neutral-800 rounded-lg p-3 mt-1 h-48 overflow-y-auto space-y-2 text-sm">
+                </ul>
+            </div>
+
+            <button id="view-report-btn" class="w-full bg-neutral-600 hover:bg-neutral-500 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200">
+                View Full LLM Report
+            </button>
+        </div>
+    </aside>
+
+    <main class="flex-grow h-full z-10">
+        <div id="map" class="h-full w-full"></div>
+    </main>
+
+    <div id="report-modal" class="modal fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 opacity-0">
+        <div class="modal-content bg-neutral-800 text-neutral-200 rounded-lg shadow-xl w-full max-w-2xl p-6 scale-95">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-2xl font-bold text-white">Full Intelligence Report</h2>
+                <button id="close-modal-btn" class="text-neutral-400 hover:text-white">&times;</button>
+            </div>
+            <div class="bg-neutral-900 p-4 rounded-lg max-h-[60vh] overflow-y-auto">
+                <pre id="llm-report-content" class="text-sm text-neutral-300 whitespace-pre-wrap font-sans">Loading report...</pre>
+            </div>
+        </div>
+    </div>
+
+    <div id="alert-overlay" class="fixed inset-0 bg-red-600 bg-opacity-95 flex items-center justify-center z-50 hidden">
+        <div class="bg-white p-8 rounded-lg shadow-2xl max-w-md text-center border-4 border-red-600">
+            <div class="text-6xl mb-4">🚨</div>
+            <h2 class="text-2xl font-bold text-red-600 mb-4">URGENT ALERT</h2>
+            <p class="text-lg text-gray-800 mb-4" id="alert-message">Anomalies detected in satellite surveillance!</p>
+            <div class="text-sm text-gray-600 mb-6" id="alert-details"></div>
+            <button id="alert-dismiss-btn" class="bg-red-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-red-700 transition-colors">
+                Acknowledge & Dismiss
+            </button>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+
+    <script>
+        const API_URL = "http://127.0.0.1:8000/api/v1/analyze_aoi";
+
+        const startMonitoringBtn = document.getElementById('start-monitoring-btn');
+        const checkNowBtn = document.getElementById('check-now-btn');
+        const locationSelect = document.getElementById('location-select');
+        const monitoringStatus = document.getElementById('monitoring-status');
+        const statusPanel = document.getElementById('status-panel');
+        const loader = document.getElementById('loader');
+        const statusText = document.getElementById('status-text');
+        const resultsPanel = document.getElementById('results-panel');
+        const riskScoreEl = document.getElementById('risk-score');
+        const keyDetectionsList = document.getElementById('key-detections');
+        const viewReportBtn = document.getElementById('view-report-btn');
+        const modal = document.getElementById('report-modal');
+        const modalContent = document.getElementById('llm-report-content');
+        const closeModalBtn = document.getElementById('close-modal-btn');
+        const alertOverlay = document.getElementById('alert-overlay');
+        const alertMessage = document.getElementById('alert-message');
+        const alertDetails = document.getElementById('alert-details');
+        const alertDismissBtn = document.getElementById('alert-dismiss-btn');
+
+        let monitoringInterval = null;
+        let isMonitoring = false;
+
+        let map;
+        let drawnItems;
+        let baseLayers;
+        let overlayLayers = L.layerGroup();
+        let anomalyMarkers = L.layerGroup();
+
+        function initMap() {
+            map = L.map('map', {
+                center: [31.6, 74.575],
+                zoom: 14,
+                zoomControl: true
+            });
+
+            const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '© OpenStreetMap'
+            });
+
+            const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: '© Esri'
+            });
+
+            baseLayers = {
+                "OpenStreetMap": osm,
+                "Satellite": satellite
+            };
+
+            satellite.addTo(map);
+            overlayLayers.addTo(map);
+            anomalyMarkers.addTo(map);
+
+            drawnItems = new L.FeatureGroup();
+            map.addLayer(drawnItems);
+
+            const drawControl = new L.Control.Draw({
+                edit: {
+                    featureGroup: drawnItems,
+                    remove: true
+                },
+                draw: {
+                    polygon: false,
+                    polyline: false,
+                    circle: false,
+                    marker: false,
+                    circlemarker: false,
+                    rectangle: true
+                }
+            });
+            map.addControl(drawControl);
+
+            L.control.layers(baseLayers, {
+                "Anomaly Detection": overlayLayers,
+                "Detected Objects": anomalyMarkers
+            }).addTo(map);
+
+            initEventListeners();
+        }
+
+        function getLocationName() {
+            const locationNames = {
+                'wagah': 'Wagah Border',
+                'loc': 'Line of Control',
+                'custom': 'Custom Location'
+            };
+            return locationNames[locationSelect.value] || 'Unknown';
+        }
+
+        function focusOnLocation(location) {
+            const coordinates = {
+                'wagah': [31.6, 74.575],
+                'loc': [34.55, 74.35],
+                'custom': [20.5, 78.5]
+            };
+            
+            if (coordinates[location]) {
+                map.flyTo(coordinates[location], 14, { duration: 2 });
+            }
+        }
+
+        function showImmediateAlert(alertData) {
+            const count = alertData.count;
+            const maxThreat = alertData.maxThreat;
+            
+            let threatText = 'LOW';
+            let threatColor = 'text-yellow-600';
+            
+            if (maxThreat >= 3) {
+                threatText = 'HIGH';
+                threatColor = 'text-red-600';
+            } else if (maxThreat >= 2) {
+                threatText = 'MEDIUM';
+                threatColor = 'text-orange-600';
+            }
+
+            alertMessage.textContent = `${count} anomalies detected in satellite surveillance!`;
+            alertDetails.innerHTML = `
+                <strong>Location:</strong> ${getLocationName()}<br>
+                <strong>Max Threat Level:</strong> <span class="${threatColor} font-bold">${threatText}</span><br>
+                <strong>Detection Time:</strong> ${new Date().toLocaleString()}
+            `;
+            
+            alertOverlay.classList.remove('hidden');
+            
+            setTimeout(() => {
+                if (!alertOverlay.classList.contains('hidden')) {
+                    alertOverlay.classList.add('hidden');
+                }
+            }, 10000);
+        }
+
+        function hideAlert() {
+            alertOverlay.classList.add('hidden');
+        }
+
+        function initEventListeners() {
+            viewReportBtn.addEventListener('click', () => {
+                modal.classList.remove('opacity-0');
+                modal.querySelector('.modal-content').classList.remove('scale-95');
+            });
+
+            closeModalBtn.addEventListener('click', () => {
+                modal.classList.add('opacity-0');
+                modal.querySelector('.modal-content').classList.add('scale-95');
+            });
+
+            alertDismissBtn.addEventListener('click', hideAlert);
+
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    modal.classList.add('opacity-0');
+                    modal.querySelector('.modal-content').classList.add('scale-95');
+                }
+            });
+        }
+
+        function showLoading(message) {
+            statusText.textContent = message;
+            statusPanel.classList.remove('hidden');
+            resultsPanel.classList.add('hidden');
+        }
+
+        function hideLoading() {
+            statusPanel.classList.add('hidden');
+        }
+
+        function showResults(data) {
+            hideLoading();
+
+            riskScoreEl.textContent = data.risk_score.toFixed(1);
+
+            if (data.risk_score > 7.0) {
+                riskScoreEl.className = "text-3xl font-bold text-red-500";
+            } else if (data.risk_score > 4.0) {
+                riskScoreEl.className = "text-3xl font-bold text-yellow-500";
+            } else {
+                riskScoreEl.className = "text-3xl font-bold text-green-500";
+            }
+
+            keyDetectionsList.innerHTML = '';
+
+            if (data.fused_data && data.fused_data.length > 0) {
+                data.fused_data.forEach(detection => {
+                    const li = document.createElement('li');
+                    li.className = `p-2 rounded-lg ${
+                        detection.threat_level === 'HIGH' ? 'bg-red-900' :
+                        detection.threat_level === 'MEDIUM' ? 'bg-yellow-800' : 'bg-green-800'
+                    }`;
+                    li.innerHTML = `
+                        <div class="font-medium">${detection.class}</div>
+                        <div class="text-xs opacity-80">Threat: ${detection.threat_level}</div>
+                        <div class="text-xs opacity-80">Confidence: ${(detection.confidence * 100).toFixed(1)}%</div>
+                    `;
+                    keyDetectionsList.appendChild(li);
+                });
+            } else {
+                keyDetectionsList.innerHTML = '<li class="text-green-400">✅ No anomalies detected</li>';
+            }
+
+            modalContent.textContent = data.report_summary;
+
+            resultsPanel.classList.remove('hidden');
+        }
+
+        function startMonitoring() {
+            if (isMonitoring) {
+                stopMonitoring();
+                return;
+            }
+            
+            isMonitoring = true;
+            monitoringStatus.classList.remove('hidden');
+            startMonitoringBtn.textContent = '🛑 Stop Monitoring';
+            startMonitoringBtn.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+            startMonitoringBtn.classList.add('bg-red-600', 'hover:bg-red-700');
+            
+            performSatelliteCheck();
+            
+            monitoringInterval = setInterval(performSatelliteCheck, 10000);
+        }
+
+        function stopMonitoring() {
+            isMonitoring = false;
+            monitoringStatus.classList.add('hidden');
+            startMonitoringBtn.textContent = '🔄 Start Monitoring';
+            startMonitoringBtn.classList.remove('bg-red-600', 'hover:bg-red-700');
+            startMonitoringBtn.classList.add('bg-blue-600', 'hover:bg-blue-700');
+            
+            if (monitoringInterval) {
+                clearInterval(monitoringInterval);
+                monitoringInterval = null;
+            }
+        }
+
+        async function performSatelliteCheck() {
+            try {
+                console.log(`[Monitor] Checking satellite data for ${getLocationName()}...`);
+                
+                const currentLocation = locationSelect.value;
+                const aoiData = getLocationBounds(currentLocation);
+                
+                showLoading('🛰️ Fetching live satellite data...');
+
+                const response = await fetch(`${API_URL}/monitor`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ location: currentLocation, aoi_bounds: aoiData })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Monitoring error: ${response.status}`);
+                }
+
+                const data = await response.json();
+                console.log("[Monitor] Satellite check complete:", data);
+
+                if (data.has_changes && data.fused_data && data.fused_data.length > 0) {
+                    showImmediateAlert({
+                        count: data.fused_data.length,
+                        maxThreat: Math.max(...data.fused_data.map(d => d.threat_level === 'HIGH' ? 3 : d.threat_level === 'MEDIUM' ? 2 : 1))
+                    });
+                    
+                    showResults(data);
+                    updateMapWithAnomalies(data);
+                } else {
+                    resultsPanel.classList.add('hidden');
+                    statusPanel.classList.add('hidden');
+                }
+
+            } catch (error) {
+                console.error('Monitoring Error:', error);
+                if (isMonitoring) {
+                    statusText.textContent = `Monitoring Error: ${error.message}`;
+                    statusPanel.classList.remove('hidden');
+                }
+            }
+        }
+
+        function getLocationBounds(location) {
+            const bounds = {
+                'wagah': {
+                    north_east: { lat: 31.625, lng: 74.615 },
+                    south_west: { lat: 31.575, lng: 74.535 }
+                },
+                'loc': {
+                    north_east: { lat: 34.6, lng: 74.4 },
+                    south_west: { lat: 34.5, lng: 74.3 }
+                },
+                'custom': {
+                    north_east: { lat: 21, lng: 79 },
+                    south_west: { lat: 20, lng: 78 }
+                }
+            };
+            return bounds[location] || bounds['wagah'];
+        }
+
+        function clearMapLayers() {
+            overlayLayers.clearLayers();
+            anomalyMarkers.clearLayers();
+        }
+
+        function createAnomalyMarker(feature, latlng) {
+            const threatLevel = feature.properties.threat_level || 'LOW';
+            let markerColor, markerSize, markerIcon;
+            
+            switch(threatLevel) {
+                case 'HIGH':
+                    markerColor = '#dc2626';
+                    markerSize = 12;
+                    markerIcon = '⚠️';
+                    break;
+                case 'MEDIUM':
+                    markerColor = '#f59e0b';
+                    markerSize = 10;
+                    markerIcon = '⚡';
+                    break;
+                default:
+                    markerColor = '#10b981';
+                    markerSize = 8;
+                    markerIcon = '📍';
+            }
+            
+            return L.circleMarker(latlng, {
+                radius: markerSize,
+                color: markerColor,
+                fillColor: markerColor,
+                fillOpacity: 0.8,
+                weight: 2
+            }).bindPopup(
+                `<div class="p-2">
+                    <h3 class="font-bold text-red-600">${markerIcon} ANOMALY DETECTED</h3>
+                    <p><strong>Class:</strong> ${feature.properties.class}</p>
+                    <p><strong>Threat Level:</strong> <span class="font-bold">${threatLevel}</span></p>
+                    <p><strong>Confidence:</strong> ${(feature.properties.confidence * 100).toFixed(1)}%</p>
+                    <p><strong>Location:</strong> ${latlng.lat.toFixed(4)}, ${latlng.lng.toFixed(4)}</p>
+                </div>`
+            );
+        }
+
+        function updateMapWithAnomalies(data) {
+            clearMapLayers();
+            
+            const bounds = [
+                [data.image_bounds.south_west.lat, data.image_bounds.south_west.lng],
+                [data.image_bounds.north_east.lat, data.image_bounds.north_east.lng]
+            ];
+
+            L.imageOverlay(data.change_mask_url, bounds, {
+                opacity: 0.7,
+                interactive: true
+            }).addTo(overlayLayers);
+
+            L.geoJSON(data.anomalies_geojson, {
+                pointToLayer: (feature, latlng) => {
+                    const threatLevel = feature.properties.threat_level || 'LOW';
+                    let markerColor, markerSize;
+                    
+                    switch(threatLevel) {
+                        case 'HIGH':
+                            markerColor = '#dc2626';
+                            markerSize = 15;
+                            break;
+                        case 'MEDIUM':
+                            markerColor = '#f59e0b';
+                            markerSize = 12;
+                            break;
+                        default:
+                            markerColor = '#10b981';
+                            markerSize = 10;
+                    }
+                    
+                    const marker = L.circleMarker(latlng, {
+                        radius: markerSize,
+                        color: markerColor,
+                        fillColor: markerColor,
+                        fillOpacity: 0.8,
+                        weight: 3,
+                        className: 'anomaly-marker'
+                    }).bindPopup(
+                        `<div class="p-3 bg-red-50">
+                            <h3 class="font-bold text-red-800 mb-2">🚨 LIVE ANOMALY DETECTED</h3>
+                            <p class="text-sm"><strong>Type:</strong> ${feature.properties.class}</p>
+                            <p class="text-sm"><strong>Threat:</strong> <span class="font-bold">${threatLevel}</span></p>
+                            <p class="text-sm"><strong>Detection Time:</strong> ${new Date().toLocaleString()}</p>
+                            <p class="text-sm"><strong>Coordinates:</strong> ${latlng.lat.toFixed(4)}, ${latlng.lng.toFixed(4)}</p>
+                        </div>`
+                    );
+                    
+                    if (threatLevel === 'HIGH') {
+                        setTimeout(() => {
+                            marker._path.style.animation = 'pulse 1s infinite';
+                        }, 100);
+                    }
+                    
+                    return marker;
+                }
+            }).addTo(anomalyMarkers);
+
+            anomalyMarkers.eachLayer((layer) => {
+                if (layer.feature && layer.feature.properties.threat_level === 'HIGH') {
+                    layer.openPopup();
+                    return false;
+                }
+            });
+
+            map.flyToBounds(bounds, { duration: 1.5 });
+        }
+
+        async function performManualCheck() {
+            await performSatelliteCheck();
+        }
+
+        startMonitoringBtn.addEventListener('click', startMonitoring);
+        checkNowBtn.addEventListener('click', performManualCheck);
+        
+        locationSelect.addEventListener('change', (e) => {
+            focusOnLocation(e.target.value);
+            if (isMonitoring) {
+                performSatelliteCheck();
+            }
+        });
+
+        document.addEventListener('DOMContentLoaded', initMap);
+
+    </script>
+</body>
+</html>
