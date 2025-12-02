@@ -1,6 +1,3 @@
-import rasterio
-from rasterio.transform import Affine
-
 def convert_pixels_to_geojson(pixel_data: list, aoi_bounds: dict, image_dims: tuple):
     
     img_height, img_width = image_dims

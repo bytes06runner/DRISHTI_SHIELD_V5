@@ -138,31 +138,6 @@ async def analyze_area_of_interest(
         }
 
         return response_payload
-        
-        print("[API] Generating final report...")
-        report_context = {
-            "aoi_coordinates": aoi_bounds.dict(),
-            "detected_anomalies": fused_data,
-            "overall_ssim_score": ssim_score,
-            "risk_score": risk_score,
-            "num_anomalies": num_anomalies,
-            "has_high_threat": any(d.get("threat_level") == "HIGH" for d in fused_data)
-        }
-        report_text = generate_intelligence_summary(report_context, risk_score)
-
-        print("[API] Analysis complete. Sending response.")
-        response_data = {
-            "report_summary": report_text,
-            "change_mask_url": change_mask_url,
-            "anomalies_geojson": anomalies_geojson,
-            "image_bounds": aoi_bounds.dict(),
-            "risk_score": risk_score,
-            "fused_data": fused_data,
-            "has_changes": num_anomalies > 0,
-            "warning_message": f"⚠️ WARNING!! Noticed {num_anomalies} changes detected in AOI" if num_anomalies > 0 else "✅ No significant changes detected"
-        }
-        
-        return response_data
 
     except Exception as e:
         print(f"[API Error] {e}")
