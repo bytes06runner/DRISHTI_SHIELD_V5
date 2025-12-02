@@ -35,6 +35,7 @@ venv.bak/
 static/*
 !static/.gitkeep
 data/*
+!data/sim_border_*.jpg
 !data/.gitkeep
 
 *.log
