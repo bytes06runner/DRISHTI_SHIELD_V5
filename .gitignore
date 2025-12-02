@@ -34,11 +34,8 @@ venv.bak/
 
 static/*
 !static/.gitkeep
-data/uploads/*
-!data/uploads/.gitkeep
-data/*.png
-data/*.jpg
-!data/sim_*.jpg
+data/*
+!data/.gitkeep
 
 *.log
 logs/

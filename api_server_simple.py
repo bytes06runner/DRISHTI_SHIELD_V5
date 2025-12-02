@@ -7,8 +7,31 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from typing import Dict, Any, Annotated
-from PIL import Image
+from PIL import Image, ImageDraw
 import random
+
+def create_placeholder_mask(filename="placeholder_mask.png"):
+    """Create a simple placeholder mask image"""
+    try:
+        # Create a 512x512 image with black background
+        img = Image.new('RGB', (512, 512), color='black')
+        draw = ImageDraw.Draw(img)
+        
+        # Draw some random white rectangles to simulate change areas
+        for i in range(random.randint(1, 3)):
+            x1 = random.randint(50, 300)
+            y1 = random.randint(50, 300)
+            x2 = x1 + random.randint(30, 100)
+            y2 = y1 + random.randint(30, 100)
+            draw.rectangle([x1, y1, x2, y2], fill='white')
+        
+        # Save to static directory
+        static_path = f"static/{filename}"
+        img.save(static_path)
+        return f"/static/{filename}"
+    except:
+        # If PIL fails, return a placeholder URL
+        return "/static/placeholder_mask.png"
 
 app = FastAPI(title="DRISHTI-SHIELD API")
 
@@ -28,13 +51,26 @@ def root():
     return FileResponse("frontend/index.html")
 
 def simple_change_detection_simulation():
-    """Simulate change detection without heavy dependencies"""
-    detected_contours = [
-        {"area": 1200, "bbox": [100, 100, 50, 50]},
-        {"area": 800, "bbox": [200, 150, 30, 30]},
-        {"area": 400, "bbox": [300, 200, 20, 20]}
-    ]
-    ssim_score = 0.75
+    """Simulate change detection without any external dependencies"""
+    import random
+    
+    # Generate random realistic anomaly data
+    num_anomalies = random.randint(1, 4)
+    detected_contours = []
+    
+    for i in range(num_anomalies):
+        area = random.randint(300, 2000)
+        x = random.randint(50, 400)
+        y = random.randint(50, 300)
+        w = random.randint(20, 80)
+        h = random.randint(20, 60)
+        
+        detected_contours.append({
+            "area": area, 
+            "bbox": [x, y, w, h]
+        })
+    
+    ssim_score = random.uniform(0.65, 0.85)
     return None, ssim_score, detected_contours
 
 def convert_pixels_to_geojson_simple(pixel_data: list, aoi_bounds: dict):
@@ -103,6 +139,9 @@ async def analyze_area_of_interest(
         # Simulate processing without actually processing images
         change_mask, ssim_score, detected_contours = simple_change_detection_simulation()
         
+        # Generate a dynamic mask image
+        mask_url = create_placeholder_mask(f"mask_{random.randint(1000,9999)}.png")
+        
         fused_data = []
         total_anomaly_area = 0
         
@@ -144,7 +183,7 @@ async def analyze_area_of_interest(
         
         response_payload = {
             "report_summary": report_text,
-            "change_mask_url": "/static/placeholder_mask.png",
+            "change_mask_url": mask_url,
             "anomalies_geojson": anomalies_geojson,
             "image_bounds": aoi_bounds,
             "risk_score": risk_score,
@@ -165,6 +204,9 @@ async def monitor_satellite_data(request: dict):
         aoi_bounds = request.get("aoi_bounds")
         
         change_mask, ssim_score, detected_contours = simple_change_detection_simulation()
+        
+        # Generate a dynamic mask image for monitoring
+        mask_url = create_placeholder_mask(f"monitor_{location}_{int(time.time())}.png")
         
         fused_data = []
         for i, contour_data in enumerate(detected_contours):
@@ -220,7 +262,7 @@ async def monitor_satellite_data(request: dict):
         
         response_data = {
             "report_summary": report_text,
-            "change_mask_url": "/static/placeholder_mask.png",
+            "change_mask_url": mask_url,
             "anomalies_geojson": anomalies_geojson,
             "image_bounds": aoi_bounds,
             "risk_score": risk_score,
